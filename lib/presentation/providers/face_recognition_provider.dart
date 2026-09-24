@@ -1,5 +1,8 @@
+import 'dart:math' as math;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:image/image.dart' as img;
+import 'package:smart_attendance/core/constants/app_constants.dart';
 import 'package:smart_attendance/core/utils/camera_service.dart';
 import 'package:smart_attendance/core/utils/face_utils.dart';
 import 'package:smart_attendance/core/utils/mlkit_face_service.dart';
@@ -12,13 +15,19 @@ class FaceRecognitionProvider extends ChangeNotifier {
   final TFLiteService _tfliteService = TFLiteService();
   final MLKitFaceService _mlKitService = MLKitFaceService();
 
+  // Lazy Firebase instances to avoid blocking main thread at startup
+  FirebaseAuth? _firebaseAuth;
+  FirebaseFirestore? _firestore;
+  FirebaseAuth get _auth => _firebaseAuth ??= FirebaseAuth.instance;
+  FirebaseFirestore get _db => _firestore ??= FirebaseFirestore.instance;
+
   FaceRecognitionState _state = FaceRecognitionState.initial;
   String? _capturedImagePath;
   List<double>? _faceEmbedding;
   String? _error;
-  bool _useTFLite = false; // Flag to use TFLite or fallback to simulation
+  bool _useTFLite = false;
+  int _registrationProgress = 0;
 
-  // Getters
   FaceRecognitionState get state => _state;
   CameraService get cameraService => _cameraService;
   String? get capturedImagePath => _capturedImagePath;
@@ -26,34 +35,28 @@ class FaceRecognitionProvider extends ChangeNotifier {
   String? get error => _error;
   bool get isCameraInitialized => _cameraService.isInitialized;
   bool get isTFLiteAvailable => _useTFLite;
+  int get registrationProgress => _registrationProgress;
 
-  /// Initialize camera and ML services
   Future<void> initializeCamera() async {
     try {
       _state = FaceRecognitionState.loading;
       _error = null;
       notifyListeners();
 
-      // Initialize camera
       await _cameraService.initialize();
 
-      // Try to initialize TFLite
       try {
         await _tfliteService.initialize();
         _useTFLite = true;
-        print('✅ TFLite model loaded - Using real face recognition');
+        print('TFLite Service successfully initialized in provider');
       } catch (e) {
-        print('⚠️  TFLite not available - Using simulated embeddings');
+        print('TFLite initialization failed, using fallback: $e');
         _useTFLite = false;
       }
 
-      // Initialize ML Kit for face quality check
       try {
         await _mlKitService.initialize();
-        print('✅ ML Kit initialized - Face quality checks enabled');
-      } catch (e) {
-        print('⚠️  ML Kit not available - Skipping quality checks');
-      }
+      } catch (_) {}
 
       _state = FaceRecognitionState.initial;
       notifyListeners();
@@ -64,7 +67,6 @@ class FaceRecognitionProvider extends ChangeNotifier {
     }
   }
 
-  /// Capture image from camera
   Future<bool> captureImage() async {
     try {
       _state = FaceRecognitionState.loading;
@@ -74,7 +76,6 @@ class FaceRecognitionProvider extends ChangeNotifier {
       final imagePath = await _cameraService.captureImage();
       _capturedImagePath = imagePath;
 
-      // Check face quality using ML Kit
       if (_mlKitService.isInitialized) {
         final qualityCheck = await _mlKitService.checkFaceQuality(imagePath);
         if (qualityCheck['isGood'] != true) {
@@ -96,21 +97,16 @@ class FaceRecognitionProvider extends ChangeNotifier {
     }
   }
 
-  /// Generate face embedding
   Future<bool> generateEmbedding() async {
     try {
-      if (_capturedImagePath == null) {
-        throw Exception('No image captured');
-      }
+      if (_capturedImagePath == null) throw Exception('No image captured');
 
       _state = FaceRecognitionState.loading;
       notifyListeners();
 
       if (_useTFLite && _tfliteService.isInitialized) {
-        // Use real TFLite model
         await _generateRealEmbedding();
       } else {
-        // Fallback to simulated embedding
         await _generateSimulatedEmbedding();
       }
 
@@ -125,42 +121,138 @@ class FaceRecognitionProvider extends ChangeNotifier {
     }
   }
 
-  /// Generate real embedding using TFLite
-  Future<void> _generateRealEmbedding() async {
-    // Preprocess image
-    final image = await _cameraService.preprocessImage(_capturedImagePath!);
-    
-    // Run TFLite inference
-    _faceEmbedding = await _tfliteService.generateEmbedding(image);
-    
-    print('✅ Generated real face embedding (${_faceEmbedding!.length} dimensions)');
+  Future<bool> registerCurrentUserFace({
+    int sampleCount = AppConstants.faceCaptureCount,
+  }) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) throw Exception('Please login before registering your face');
+
+      if (!_cameraService.isInitialized) await initializeCamera();
+
+      _state = FaceRecognitionState.loading;
+      _error = null;
+      _registrationProgress = 0;
+      notifyListeners();
+
+      final embeddings = <List<double>>[];
+      for (int i = 0; i < sampleCount; i++) {
+        final captured = await captureImage();
+        if (!captured) return false;
+
+        final processed = await generateEmbedding();
+        if (!processed || _faceEmbedding == null) return false;
+
+        embeddings.add(_faceEmbedding!);
+        _registrationProgress = i + 1;
+        notifyListeners();
+
+        if (i < sampleCount - 1) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+
+      final averagedEmbedding = _averageEmbeddings(embeddings);
+      await _db.collection('face_embeddings').doc(user.uid).set({
+        'embeddingId': user.uid,
+        'userId': user.uid,
+        'embedding': averagedEmbedding,
+        'sampleCount': embeddings.length,
+        'dimension': averagedEmbedding.length,
+        'confidence': _useTFLite ? 1.0 : 0.5,
+        'method': _useTFLite ? 'TFLite' : 'Simulated',
+        'isActive': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      _faceEmbedding = averagedEmbedding;
+      _state = FaceRecognitionState.processed;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _state = FaceRecognitionState.error;
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    }
   }
 
-  /// Generate simulated embedding (fallback)
-  Future<void> _generateSimulatedEmbedding() async {
-    await Future.delayed(const Duration(seconds: 1));
-    
-    // Generate deterministic embedding based on image path
-    // This way same image always produces same embedding (for testing)
-    final seed = _capturedImagePath.hashCode;
-    final random = DateTime.now().millisecondsSinceEpoch;
-    
-    _faceEmbedding = List.generate(
-      192, 
-      (index) => ((seed + index * random) % 1000) / 1000.0,
-    );
-    
-    print('⚠️  Generated simulated embedding (for testing only)');
+  Future<Map<String, dynamic>?> verifyCurrentUserAndMarkAttendance() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) throw Exception('Please login before marking attendance');
+
+      final storedEmbedding = await getRegisteredEmbedding(user.uid);
+      if (storedEmbedding == null) {
+        throw Exception('No registered face found. Register your face first.');
+      }
+
+      final captured = await captureImage();
+      if (!captured) return null;
+
+      final processed = await generateEmbedding();
+      if (!processed) return null;
+
+      final result = await compareFace(storedEmbedding);
+      if (result == null) return null;
+
+      if (result['match'] == true) {
+        await _saveAttendance(
+          userId: user.uid,
+          confidence: result['similarity'] as double,
+        );
+      }
+
+      return result;
+    } catch (e) {
+      _state = FaceRecognitionState.error;
+      _error = e.toString();
+      notifyListeners();
+      return null;
+    }
   }
 
-  /// Compare face with stored embedding
-  Future<Map<String, dynamic>?> compareFace(List<double> storedEmbedding) async {
-    if (_faceEmbedding == null) {
-      throw Exception('No face embedding generated');
+  Future<List<double>?> getRegisteredEmbedding(String userId) async {
+    final doc = await _db.collection('face_embeddings').doc(userId).get();
+    final data = doc.data();
+    if (!doc.exists || data == null || data['isActive'] != true) return null;
+
+    final embedding = (data['embedding'] as List<dynamic>)
+        .map((value) => (value as num).toDouble())
+        .toList();
+
+    if (_faceEmbedding != null && _faceEmbedding!.length != embedding.length) {
+      throw Exception(
+        'Registered face embedding has ${embedding.length} dimensions, '
+        'but the current model produced ${_faceEmbedding!.length}. '
+        'Please register your face again.',
+      );
     }
 
+    return embedding;
+  }
+
+  Future<void> _generateRealEmbedding() async {
+    final image = await _cameraService.preprocessImage(_capturedImagePath!);
+    _faceEmbedding = await _tfliteService.generateEmbedding(image);
+  }
+
+  Future<void> _generateSimulatedEmbedding() async {
+    await Future.delayed(const Duration(seconds: 1));
+    final seed = _capturedImagePath.hashCode;
+    final raw = List.generate(
+      192,
+      (index) => math.sin(seed + index * 1.5),
+    );
+    _faceEmbedding = FaceUtils.normalizeEmbedding(raw);
+  }
+
+  Future<Map<String, dynamic>?> compareFace(List<double> storedEmbedding) async {
+    if (_faceEmbedding == null) throw Exception('No face embedding generated');
+
     final similarity = FaceUtils.cosineSimilarity(_faceEmbedding!, storedEmbedding);
-    final isMatch = similarity >= 0.8;
+    final isMatch = similarity >= AppConstants.faceMatchThreshold;
 
     return {
       'match': isMatch,
@@ -170,25 +262,60 @@ class FaceRecognitionProvider extends ChangeNotifier {
     };
   }
 
-  /// Get face quality metrics
-  Future<Map<String, dynamic>?> getFaceQuality() async {
-    if (_capturedImagePath == null || !_mlKitService.isInitialized) {
-      return null;
+  List<double> _averageEmbeddings(List<List<double>> embeddings) {
+    if (embeddings.isEmpty) throw Exception('No face samples captured');
+
+    final dimension = embeddings.first.length;
+    if (embeddings.any((e) => e.length != dimension)) {
+      throw Exception('Captured face samples have inconsistent dimensions');
     }
 
+    final averaged = List<double>.filled(dimension, 0.0);
+    for (final embedding in embeddings) {
+      for (int i = 0; i < dimension; i++) {
+        averaged[i] += embedding[i];
+      }
+    }
+    for (int i = 0; i < dimension; i++) {
+      averaged[i] /= embeddings.length;
+    }
+
+    return FaceUtils.normalizeEmbedding(averaged);
+  }
+
+  Future<void> _saveAttendance({
+    required String userId,
+    required double confidence,
+  }) async {
+    final userDoc = await _db.collection('users').doc(userId).get();
+    final studentId = userDoc.data()?['studentId'] as String? ?? '';
+
+    await _db.collection('attendance').add({
+      'userId': userId,
+      'studentId': studentId,
+      'subjectId': 'default',
+      'timestamp': FieldValue.serverTimestamp(),
+      'faceMatchConfidence': confidence,
+      'status': 'present',
+      'markedBy': 'face',
+      'deviceInfo': 'mobile',
+    });
+  }
+
+  Future<Map<String, dynamic>?> getFaceQuality() async {
+    if (_capturedImagePath == null || !_mlKitService.isInitialized) return null;
     return await _mlKitService.checkFaceQuality(_capturedImagePath!);
   }
 
-  /// Reset state
   void reset() {
     _state = FaceRecognitionState.initial;
     _capturedImagePath = null;
     _faceEmbedding = null;
     _error = null;
+    _registrationProgress = 0;
     notifyListeners();
   }
 
-  /// Dispose resources
   Future<void> disposeCamera() async {
     await _cameraService.dispose();
     reset();

@@ -31,7 +31,7 @@ class HomeScreen extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
+                gradient: const LinearGradient(
                   colors: [
                     ColorConstants.primaryColor,
                     ColorConstants.primaryLight,
@@ -131,7 +131,7 @@ class HomeScreen extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         decoration: BoxDecoration(
-          color: ColorConstants.white.withOpacity(0.15),
+          color: ColorConstants.white.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
@@ -180,7 +180,7 @@ class HomeScreen extends StatelessWidget {
               width: 50,
               height: 50,
               decoration: BoxDecoration(
-                color: ColorConstants.primaryLight.withOpacity(0.1),
+                color: ColorConstants.primaryLight.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(

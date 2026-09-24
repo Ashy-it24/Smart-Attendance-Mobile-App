@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:smart_attendance/core/constants/app_constants.dart';
 import 'package:smart_attendance/core/constants/color_constants.dart';
 import 'package:smart_attendance/core/constants/string_constants.dart';
 import 'package:smart_attendance/presentation/providers/face_recognition_provider.dart';
@@ -27,28 +28,14 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen> {
 
   Future<void> _captureAndProcess() async {
     final provider = context.read<FaceRecognitionProvider>();
+    final registered = await provider.registerCurrentUserFace();
 
-    // Capture image
-    final captured = await provider.captureImage();
-    if (!captured) {
-      if (mounted) {
-        _showError(provider.error ?? 'Failed to capture image');
-      }
-      return;
-    }
+    if (!mounted) return;
 
-    // Generate embedding
-    final processed = await provider.generateEmbedding();
-    if (!processed) {
-      if (mounted) {
-        _showError(provider.error ?? 'Failed to process face');
-      }
-      return;
-    }
-
-    // Show success
-    if (mounted) {
+    if (registered) {
       _showSuccess();
+    } else {
+      _showError(provider.error ?? 'Failed to register face');
     }
   }
 
@@ -114,7 +101,9 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen> {
               Expanded(
                 child: CameraPreviewWidget(
                   controller: provider.cameraService.controller!,
-                  message: 'Position your face within the oval',
+                  message: provider.state == FaceRecognitionState.loading
+                      ? 'Capturing sample ${provider.registrationProgress + 1} of ${AppConstants.faceCaptureCount}. Keep your face steady.'
+                      : 'Position your face within the oval',
                 ),
               ),
               Container(
@@ -123,7 +112,9 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen> {
                 child: Column(
                   children: [
                     Text(
-                      'Face Registration',
+                      provider.state == FaceRecognitionState.loading
+                          ? 'Training Face Template'
+                          : 'Face Registration',
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -131,7 +122,9 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Make sure your face is well-lit and clearly visible',
+                      provider.state == FaceRecognitionState.loading
+                          ? 'The app is capturing multiple samples to build your face embedding.'
+                          : 'Make sure your face is well-lit and clearly visible',
                       style: const TextStyle(
                         fontSize: 14,
                         color: ColorConstants.textSecondary,
@@ -139,6 +132,13 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 24),
+                    if (provider.state == FaceRecognitionState.loading) ...[
+                      LinearProgressIndicator(
+                        value: provider.registrationProgress /
+                            AppConstants.faceCaptureCount,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     CustomButton(
                       label: StringConstants.captureFace,
                       icon: Icons.camera_alt,
@@ -164,7 +164,7 @@ class _FaceRegistrationScreenState extends State<FaceRegistrationScreen> {
             width: 120,
             height: 120,
             decoration: BoxDecoration(
-              color: ColorConstants.successColor.withOpacity(0.1),
+              color: ColorConstants.successColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: const Icon(

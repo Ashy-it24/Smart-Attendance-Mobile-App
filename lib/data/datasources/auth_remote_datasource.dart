@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:smart_attendance/data/models/user_model.dart';
 
@@ -15,8 +16,12 @@ abstract class AuthRemoteDataSource {
 
 class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   final firebase_auth.FirebaseAuth _firebaseAuth;
+  final FirebaseFirestore _firestore;
 
-  AuthRemoteDataSourceImpl(this._firebaseAuth);
+  AuthRemoteDataSourceImpl(
+    this._firebaseAuth, [
+    FirebaseFirestore? firestore,
+  ]) : _firestore = firestore ?? FirebaseFirestore.instance;
 
   @override
   Future<UserModel> loginWithEmail(String email, String password) async {
@@ -29,7 +34,12 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       final user = userCredential.user;
       if (user == null) throw Exception('User not found');
 
-      return UserModel(
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      if (userDoc.exists && userDoc.data() != null) {
+        return UserModel.fromJson(userDoc.data()!);
+      }
+
+      final userModel = UserModel(
         userId: user.uid,
         email: user.email ?? '',
         name: user.displayName ?? '',
@@ -38,6 +48,11 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         isActive: true,
         createdAt: DateTime.now(),
       );
+      await _firestore.collection('users').doc(user.uid).set(
+            userModel.toFirestore(),
+            SetOptions(merge: true),
+          );
+      return userModel;
     } on firebase_auth.FirebaseAuthException catch (e) {
       throw _handleAuthException(e);
     }
@@ -62,7 +77,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       // Set display name
       await user.updateDisplayName(name);
 
-      return UserModel(
+      final userModel = UserModel(
         userId: user.uid,
         email: email,
         name: name,
@@ -71,6 +86,12 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         isActive: true,
         createdAt: DateTime.now(),
       );
+      await _firestore.collection('users').doc(user.uid).set(
+            userModel.toFirestore(),
+            SetOptions(merge: true),
+          );
+
+      return userModel;
     } on firebase_auth.FirebaseAuthException catch (e) {
       throw _handleAuthException(e);
     }
@@ -91,7 +112,12 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       final user = _firebaseAuth.currentUser;
       if (user == null) return null;
 
-      return UserModel(
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      if (userDoc.exists && userDoc.data() != null) {
+        return UserModel.fromJson(userDoc.data()!);
+      }
+
+      final userModel = UserModel(
         userId: user.uid,
         email: user.email ?? '',
         name: user.displayName ?? '',
@@ -100,6 +126,11 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         isActive: true,
         createdAt: DateTime.now(),
       );
+      await _firestore.collection('users').doc(user.uid).set(
+            userModel.toFirestore(),
+            SetOptions(merge: true),
+          );
+      return userModel;
     } catch (e) {
       throw Exception('Failed to get current user: $e');
     }

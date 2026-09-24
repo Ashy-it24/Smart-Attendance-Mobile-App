@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' show Offset;
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';

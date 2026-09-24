@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:smart_attendance/domain/entities/user.dart';
 
 class UserModel extends User {
@@ -26,9 +27,7 @@ class UserModel extends User {
       semester: json['semester'] as int?,
       profilePicture: json['profilePicture'] as String?,
       isActive: json['isActive'] as bool? ?? true,
-      createdAt: json['createdAt'] is String
-          ? DateTime.parse(json['createdAt'] as String)
-          : (json['createdAt'] as DateTime? ?? DateTime.now()),
+      createdAt: _parseDateTime(json['createdAt']),
     );
   }
 
@@ -46,6 +45,28 @@ class UserModel extends User {
       'isActive': isActive,
       'createdAt': createdAt.toIso8601String(),
     };
+  }
+
+  Map<String, dynamic> toFirestore() {
+    return {
+      'userId': userId,
+      'email': email,
+      'name': name,
+      'studentId': studentId,
+      'role': role,
+      'department': department,
+      'semester': semester,
+      'profilePicture': profilePicture,
+      'isActive': isActive,
+      'createdAt': Timestamp.fromDate(createdAt),
+    };
+  }
+
+  static DateTime _parseDateTime(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is String) return DateTime.parse(value);
+    if (value is DateTime) return value;
+    return DateTime.now();
   }
 
   /// Create a copy of UserModel with modified fields

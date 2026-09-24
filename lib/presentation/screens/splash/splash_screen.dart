@@ -18,25 +18,32 @@ class _SplashScreenState extends State<SplashScreen> {
     _navigateAfterDelay();
   }
 
-  void _navigateAfterDelay() {
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        final authProvider = context.read<AppAuthProvider>();
-        
-        if (authProvider.isAuthenticated) {
-          Navigator.of(context).pushReplacementNamed('/home');
-        } else {
-          Navigator.of(context).pushReplacementNamed('/login');
-        }
-      }
-    });
+  void _navigateAfterDelay() async {
+    final authProvider = context.read<AppAuthProvider>();
+
+    // Wait for auth check to complete (max 5 seconds)
+    int waited = 0;
+    while (authProvider.state == AuthState.initial ||
+        authProvider.state == AuthState.loading) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      waited += 100;
+      if (waited >= 5000) break;
+    }
+
+    if (!mounted) return;
+
+    if (authProvider.isAuthenticated) {
+      Navigator.of(context).pushReplacementNamed('/home');
+    } else {
+      Navigator.of(context).pushReplacementNamed('/login');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return const Scaffold(
       backgroundColor: ColorConstants.primaryColor,
-      body: const Center(
+      body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [

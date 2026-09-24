@@ -45,7 +45,7 @@ class CameraPreviewWidget extends StatelessWidget {
               margin: const EdgeInsets.symmetric(horizontal: 20),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: ColorConstants.black.withOpacity(0.7),
+                color: ColorConstants.black.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -68,7 +68,7 @@ class FaceOverlayPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = ColorConstants.primaryColor.withOpacity(0.3)
+      ..color = ColorConstants.primaryColor.withValues(alpha: 0.3)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3;
 

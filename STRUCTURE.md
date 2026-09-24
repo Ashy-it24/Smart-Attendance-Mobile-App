@@ -7,7 +7,6 @@ This document explains the complete folder structure and architecture of the Sma
 ```
 Smart-Attendance-Mobile-App/
 ├── android/                    # Android platform-specific code
-├── ios/                        # iOS platform-specific code
 ├── assets/                     # Static assets (images, models, icons)
 ├── lib/                        # Main application code
 ├── test/                       # Test files

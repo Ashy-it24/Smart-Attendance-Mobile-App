@@ -33,28 +33,7 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
     setState(() => _isVerifying = true);
 
     final provider = context.read<FaceRecognitionProvider>();
-
-    // Step 1: Capture image
-    final captured = await provider.captureImage();
-    if (!captured) {
-      _showError(provider.error ?? 'Failed to capture image');
-      setState(() => _isVerifying = false);
-      return;
-    }
-
-    // Step 2: Generate embedding
-    final processed = await provider.generateEmbedding();
-    if (!processed) {
-      _showError(provider.error ?? 'Face not detected');
-      setState(() => _isVerifying = false);
-      return;
-    }
-
-    // Step 3: Compare with stored embedding (simulated)
-    // TODO: Fetch stored embedding from Firestore
-    final storedEmbedding = List.generate(512, (i) => 0.5 + (i % 100) / 200);
-    
-    final result = await provider.compareFace(storedEmbedding);
+    final result = await provider.verifyCurrentUserAndMarkAttendance();
     
     if (result != null && result['match'] == true) {
       setState(() {
@@ -62,19 +41,13 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
         _matchConfidence = result['similarity'];
         _isVerifying = false;
       });
-
-      // Step 4: Check location (to be implemented in Phase 9)
-      // For now, assume location is valid
-
-      // Step 5: Mark attendance
-      await Future.delayed(const Duration(seconds: 1));
       
       if (mounted) {
         _showSuccess();
       }
     } else {
       setState(() => _isVerifying = false);
-      _showError(StringConstants.faceNotDetected);
+      _showError(provider.error ?? 'Face did not match the registered user');
     }
   }
 
@@ -191,7 +164,7 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
             width: 120,
             height: 120,
             decoration: BoxDecoration(
-              color: ColorConstants.successColor.withOpacity(0.1),
+              color: ColorConstants.successColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: const Icon(
