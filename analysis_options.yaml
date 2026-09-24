@@ -1,8 +1,9 @@
-analysis_options:
+analyzer:
   exclude:
     - "**/*.g.dart"
     - "**/*.freezed.dart"
     - "test/**"
+    - "build/**"
 
 linter:
   rules:
